@@ -15,6 +15,38 @@ DATA_PATH = 'C:\\Users\\Administrator\\Documents\\486_disk\\'
 product_list = ["bu", "ru", "v", "pp", "l", "jd"]
 product = product_list[0]
 dire = os.path.join(DATA_PATH, product)
+EPSILON = 1e-5
+
+
+# def float_ndarray_equal(x, y, EPSILON=1e-5):
+#     if isinstance(pd.Series, x):
+#         x = x.values
+#     if isinstance(pd.Series, y):
+#         y = y.values
+#
+#     diff = (np.abs(x - y) < EPSILON).all()
+#     return diff
+def add_bandwidth_2mask(mask, size=5):
+    ans = np.zeros_like(mask)
+    for i in range(-size, size+1, 1):
+        ans = np.logical_or(ans, mask.shift(i, fill_value=False).values)
+    return ans
+
+def float_ndarray_equal(*args):
+    if len(args) < 1:
+        print("Warning: length must greater than 1")
+        return True
+    args = list(map(lambda x: x.values if isinstance(x, pd.Series) else x, args))
+
+    # Quick check
+    diff = (np.abs(args[0] - args[1]) < EPSILON).all()
+    if not diff:
+        return diff
+
+    # Complete check
+    x0 = args[0]
+    diffs = [(np.abs(x0 - x) < EPSILON).all() for x in args[1:]]
+    return diff and all(diffs)
 
 
 def sample_for_stationarity(data):
@@ -62,6 +94,7 @@ def compute_wpr(data):
     mask_limit = (data["ask.qty"] == 0) | (data["bid.qty"] == 0)
     wpr = np.where(mask_limit, data["price"], wpr)
     return wpr
+
 
 def load(path):
     with gzip.open(path, 'rb', compresslevel=1) as file_object:
@@ -177,7 +210,7 @@ def pnl_drawdown(s):
     return np.min(s/s.cummax() - 1)*100
 
 
-def get_performance(result, spread=1):
+def get_performance(result, spread=1, show=False):
     # Note1, np.rec.fromrecord, will create a "record array"
     # Note2, result.values --> returns a nd.array, dimension = row * col
     # The usage of record array, is to provide a mimic c-type structure
@@ -200,6 +233,8 @@ def get_performance(result, spread=1):
     plt.xlabel("date")
     plt.ylabel("pnl")
     plt.plot(stat['date'], stat['cum_pnl'])
+    if show:
+        plt.show()
     n_days = len(stat)
     num = stat["num"].mean()
     if num == 0:
