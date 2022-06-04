@@ -14,11 +14,10 @@ from itertools import chain
 from collections import OrderedDict
 from common import (load, get_sample_ret, parLapply,
                     DATA_PATH, product_list, product,
-                    compute, get_daily_pnl_fast,
-                    get_daily_pnl, dire, compute_wpr,
+                    compute, dire, compute_wpr,
                     adf_kpss, sample_for_stationarity,
                     get_performance, float_ndarray_equal,
-                    EPSILON, add_bandwidth_2mask)
+                    EPSILON, add_bandwidth_2mask, PnlCalculator)
 
 CORE_NUM = int(os.environ['NUMBER_OF_PROCESSORS'])
 
@@ -128,7 +127,8 @@ def test_data(date):
 
 def test_fast_pnl_one_file(date):
     # test-0
-    df0 = get_daily_pnl_fast(date, product="ru", period=4096,
+    calc = PnlCalculator()
+    df0 = calc.get_daily_pnl_fast(date, product="rb", period=4096,
                              tranct_ratio=True, threshold=0.001,
                              tranct=1.1e-4)
 
@@ -140,7 +140,8 @@ def test_fast_pnl_one_file(date):
 
 def test_fixed_size_pnl_one_file(date):
     # test-0
-    df0 = get_daily_pnl(date, product="rb", period=4096,
+    calc = PnlCalculator()
+    df0 = calc.get_daily_pnl(date, product="rb", period=4096,
                              tranct_ratio=True, threshold=0.001,
                              tranct=1.1e-4)
 

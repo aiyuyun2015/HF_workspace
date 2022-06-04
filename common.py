@@ -134,48 +134,82 @@ def compute_ret_and_padding(data, period):
     ret_long = pd.concat([ret_long, zeros])
     return ret_long.reset_index(drop=True)
 
+
 class PnlCalculator(object):
-    def __init__(self, date, product='rb', period=4096, tranct_ratio=False, threshold=0.001, tranct=0.21, noise=None):
-        self.date = date
-        self.product = product
-        self.period = period
-        self.tranct_ratio = tranct_ratio
-        self.threshold = threshold
-        self.tranct = tranct
+    def __init__(self):
+        self.tranct_ratio = None
+        self.threshold = None
+        self.tranct = None
+        self.noise = None
+        np.random.seed(10)
+        self.ori_data = None
+        self.middle_day_points = None
+        self.data = None
+        self.n_bar = None
+        self.unit = None
+        self.noise_ret = None
+
+    def read_from_date(self, date, product):
+        with gzip.open(dire+"/"+date, 'rb', compresslevel=1) as file_object:
+            raw_data = file_object.read()
+        self.ori_data = cPickle.loads(raw_data)
+        self.middle_day_points = self.ori_data["good"]
+        self.data = self.ori_data[self.middle_day_points].reset_index(drop=True)
+        self.n_bar = len(self.data)
+        self.unit = np.std(self.data["ret"])
+        return self.data
+
+    def compute_noise(self, noise, n_bar):
         self.noise = noise
-        
+        self.n_bar = n_bar
+        self.noise_ret = np.random.normal(scale=self.unit * self.noise, size=self.n_bar)
+        return self.noise_ret
 
-def get_daily_pnl_fast(date, product="rb", period=4096, tranct_ratio=False, threshold=0.001, tranct=0.21, noise=0):
-    '''
+    def get_daily_pnl_fast(self, date, product="rb", period=4096, tranct_ratio=False, threshold=0.001, tranct=0.21):
+        data = self.read_from_date(date, product)
+        # signal has three values: 1, 0, -1 --> price is too low, medium, high
+        ret_long = compute_ret_and_padding(data, period)
 
-    :param date:
-    :param product:
-    :param period:
-    :param tranct_ratio: ratio of transation fee, sometimes it's fixed fee
-    :param threshold: how to decide this? at least, long and short position should be similar numbers
-    :param tranct: transaction fee? in fast pnl, 0
-    :param noise:
-    :return:
-    '''
-    with gzip.open(dire+"/"+date, 'rb', compresslevel=1) as file_object:
-        raw_data = file_object.read()
-    ori_data = cPickle.loads(raw_data) ## original data
-    data = ori_data[ori_data["good"]] ## the middle day of original data
-    n_bar = len(data)  ## number of bars
-    unit = np.std(data["ret"]) ## standard deviation of return
-    np.random.seed(10)
+        mask_pos = (ret_long > threshold) & (np.array(data["next.ask"]) > 0)
+        mask_neg = (ret_long < -threshold) & (np.array(data["next.bid"]) > 0)
+        signal = np.where(mask_pos, 1, np.where(mask_neg, -1, 0))
+        # convert to series.. for his weird syntax consistency
+        position = pd.Series(signal)
 
-    # signal has three values: 1, 0, -1 --> price is too low, medium, high
-    ret_long = compute_ret_and_padding(data, period)
-    mask_pos = (ret_long > threshold) & (np.array(data["next.ask"]) > 0)
-    mask_neg = (ret_long < -threshold) & (np.array(data["next.bid"]) > 0)
-    signal = np.where(mask_pos, 1, np.where(mask_neg, -1, 0))
+        result = get_pnl_from_data_positions(data, position, tranct_ratio, tranct,date)
+        return result
 
-    # convert to series.. for his weird syntax consistency
-    position = pd.Series(signal)
+    def get_daily_pnl(self, date, product='rb', period=2000, tranct_ratio=False,
+                      threshold=0.001, tranct=1.1e-4, noise=0):
 
-    result = get_pnl_from_data_positions(data, position, tranct_ratio, tranct,date)
-    return result
+        data = self.read_from_date(date, product)
+        n_bar = self.n_bar
+        noise_ret = self.compute_noise(noise, n_bar)
+        ret_2000 = compute_ret_and_padding(data, period) + noise_ret
+
+        # # TODO: why here, there is no next.ask checking?
+        mask_pos = (ret_2000 > threshold) #& (np.array(data["next.ask"]) > 0)
+        mask_neg = (ret_2000 < -threshold) #& (np.array(data["next.bid"]) > 0)
+        signal = np.where(mask_pos, 1, np.where(mask_neg, -1, 0))
+
+        position_pos = pd.Series([np.nan] * n_bar)
+        position_pos[0] = 0
+        position_pos[(signal == 1) & (data["next.ask"] > 0) & (data["next.bid"] > 0)] = 1  ## if signal==1, position_pos=1
+        position_pos[(signal == -1) & (data["next.bid"] > 0)] = 0  ## if ret< -threshold, position_pos=0
+        position_pos.ffill(inplace=True)
+
+        position_neg = pd.Series([np.nan] * n_bar)
+        position_neg[0] = 0
+        position_neg[
+            (signal == -1) & (data["next.ask"] > 0) & (data["next.bid"] > 0)] = -1  ## if signal==-1, position_neg=-1
+        position_neg[(ret_2000 > threshold) & (data["next.ask"] > 0)] = 0  ## if ret> threshold, position_neg=0
+        position_neg.ffill(inplace=True)
+
+        position = position_pos + position_neg  ## total position
+
+        result = get_pnl_from_data_positions(data, position, tranct_ratio, tranct,date)
+
+        return result
 
 
 def to32int(df, cols):
@@ -232,50 +266,12 @@ def get_performance(result, spread=1, show=False):
 
     avg_pnl = sum(stat["final.pnl"]) / sum(stat["num"]) / spread
     hld_period = sum(stat["hld.period"]) / sum(stat["num"])
-    summary = {"sharpe": sharpe, "drawdown(%)": drawdown,
+    summary = {"sharpe": sharpe, "drawdown": drawdown,
                  "mar": mar, "win.ratio": win_ratio, "num": num,
                  "avg.pnl": avg_pnl, "hld.period": hld_period}
     return pd.DataFrame(summary, index=[0]) # pd.DataFrame([summary])
 
 
-def get_daily_pnl(date, product='rb', period=2000, tranct_ratio=False, threshold=0.001, tranct=1.1e-4, noise=0):
-    with gzip.open(dire + "/" + date, product, compresslevel=1) as file_object:
-        raw_data = file_object.read()
-    data = cPickle.loads(raw_data)
-    data = data[data["good"]].reset_index(drop=True)
-    n_bar = len(data)
-    unit = np.std(data["ret"])
-    np.random.seed(10)
-
-    noise_ret = np.random.normal(scale=unit * noise, size=n_bar)
-    ret_2000 = compute_ret_and_padding(data, period) + noise_ret
-
-    # signal = pd.Series([0] * n_bar)
-    # # TODO: why here, there is no next.ask checking?
-    # signal[ret_2000 > threshold] = 1  #
-    # signal[ret_2000 < -threshold] = -1
-    mask_pos = (ret_2000 > threshold) #& (np.array(data["next.ask"]) > 0)
-    mask_neg = (ret_2000 < -threshold) #& (np.array(data["next.bid"]) > 0)
-    signal = np.where(mask_pos, 1, np.where(mask_neg, -1, 0))
-
-    position_pos = pd.Series([np.nan] * n_bar)
-    position_pos[0] = 0
-    position_pos[(signal == 1) & (data["next.ask"] > 0) & (data["next.bid"] > 0)] = 1  ## if signal==1, position_pos=1
-    position_pos[(signal == -1) & (data["next.bid"] > 0)] = 0  ## if ret< -threshold, position_pos=0
-    position_pos.ffill(inplace=True)
-
-    position_neg = pd.Series([np.nan] * n_bar)
-    position_neg[0] = 0
-    position_neg[
-        (signal == -1) & (data["next.ask"] > 0) & (data["next.bid"] > 0)] = -1  ## if signal==-1, position_neg=-1
-    position_neg[(ret_2000 > threshold) & (data["next.ask"] > 0)] = 0  ## if ret> threshold, position_neg=0
-    position_neg.ffill(inplace=True)
-
-    position = position_pos + position_neg  ## total position
-
-    result = get_pnl_from_data_positions(data, position, tranct_ratio, tranct,date)
-
-    return result
 
 
 def get_pnl_from_data_positions(data, position, tranct_ratio, tranct, date):

@@ -16,19 +16,18 @@ from collections import OrderedDict
 import functools
 from common import (load, get_sample_ret, parLapply,
                     DATA_PATH, product_list, product,
-                    compute, get_daily_pnl_fast,
-                    get_daily_pnl, dire, compute_wpr,
+                    compute, dire, compute_wpr,
                     adf_kpss, sample_for_stationarity,
                     get_performance, float_ndarray_equal,
-                    EPSILON, add_bandwidth_2mask)
+                    EPSILON, add_bandwidth_2mask, PnlCalculator)
 from test_func import (compute_pnl_with_dask, test_data,
                        test_fast_pnl_one_file, test_fixed_size_pnl_one_file)
 
 
 def main():
-    if DEBUG:
-        global all_dates
-        all_dates = all_dates[0:200]
+    # if DEBUG:
+    #     global all_dates
+    #     all_dates = all_dates[0:200]
     # First peek at the dataframe
     if False:
         test_data(all_dates[0])
@@ -64,8 +63,8 @@ def main():
 
 
     test_fixed_size_pnl_one_file(all_dates[0])
-
-
+    calc = PnlCalculator()
+    compute_pnl_with_dask(all_dates, calc.get_daily_pnl, 0.001, product='rb' )
 
 
     exit()
