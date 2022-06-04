@@ -110,9 +110,6 @@ def parLapply(CORE_NUM, iterable, func, *args, **kwargs):
     return result
 
 
-
-
-
 class PnlCalculator(object):
     def __init__(self):
         self.tranct_ratio = None
@@ -122,9 +119,9 @@ class PnlCalculator(object):
         np.random.seed(10)
         self.ori_data = None
         self.middle_day_points = None
-        self.data = None
-        self.n_bar = None
-        self.unit = None
+        self.data = {}
+        self.n_bar = {}
+        self.unit = {}
         self.noise_ret = None
 
     @staticmethod
@@ -152,20 +149,23 @@ class PnlCalculator(object):
         ret_long = pd.concat([ret_long, zeros])
         return ret_long.reset_index(drop=True)
 
-    def read_from_date(self, date, product):
-        with gzip.open(dire+"/"+date, 'rb', compresslevel=1) as file_object:
+    def read_from_date(self, date):
+        if date in self.data:
+            print(f'cached..{date}')
+            return self.data[date]
+        input_file = dire+"/"+date
+        #print(f"open file {input_file}")
+        with gzip.open(input_file, 'rb', compresslevel=1) as file_object:
             raw_data = file_object.read()
-        self.ori_data = cPickle.loads(raw_data)
-        self.middle_day_points = self.ori_data["good"]
-        self.data = self.ori_data[self.middle_day_points].reset_index(drop=True)
-        self.n_bar = len(self.data)
-        self.unit = np.std(self.data["ret"])
-        return self.data
+        temp = cPickle.loads(raw_data)
+        mask = temp["good"]
+        self.data[date] = temp[mask].reset_index(drop=True)
+        self.n_bar[date] = len(self.data)
+        self.unit[date] = np.std(self.data[date]["ret"])
+        return self.data[date]
 
-    def compute_noise(self, noise, n_bar):
-        self.noise = noise
-        self.n_bar = n_bar
-        self.noise_ret = np.random.normal(scale=self.unit * self.noise, size=self.n_bar)
+    def compute_noise(self, date, noise):
+        self.noise_ret = np.random.normal(scale=self.unit[date] * noise, size=self.n_bar[date])
         return self.noise_ret
 
     @staticmethod
@@ -186,8 +186,9 @@ class PnlCalculator(object):
         position = position.fillna(method='ffill').fillna(0)
         return position
 
-    def get_daily_pnl_fast(self, date, product="rb", period=4096, tranct_ratio=False, threshold=0.001, tranct=0.21, noise=0):
-        data = self.read_from_date(date, product)
+    # TODO: think about how to make the arguments aligned, ... we have three PNL computation functions
+    def get_daily_pnl_fast(self, date, product="rb", period=4096, tranct_ratio=False, threshold=0.001, tranct=0.21, noise=0, notional=False):
+        data = self.read_from_date(date)
         # signal has three values: 1, 0, -1 --> price is too low, medium, high
         ret_long = self.compute_ret_and_padding(data, period)
         position = self.agressive_strategy(data, ret_long, threshold)
@@ -195,11 +196,10 @@ class PnlCalculator(object):
         return result
 
     def get_daily_pnl(self, date, product='rb', period=2000, tranct_ratio=False,
-                      threshold=0.001, tranct=1.1e-4, noise=0):
-
-        data = self.read_from_date(date, product)
+                      threshold=0.001, tranct=1.1e-4, noise=0, notional=False):
+        data = self.read_from_date(date)
         n_bar = self.n_bar
-        noise_ret = self.compute_noise(noise, n_bar)
+        noise_ret = self.compute_noise(date, noise)
         ret_long = self.compute_ret_and_padding(data, period) + noise_ret
         # # TODO: why here, there is no next.ask checking?
         position = self.conservative_strategy(data, ret_long, threshold)
@@ -207,6 +207,42 @@ class PnlCalculator(object):
 
         return result
 
+    ## daily pnl of fixed capital
+    def get_daily_pnl_fixed_capital(self, date, product="rb", period=2000, tranct_ratio=False,
+                                   threshold=0.001, tranct=1.1e-4, noise=0, notional=False):
+        data = self.read_from_date(date)
+        n_bar = self.n_bar
+        noise_ret = self.compute_noise(noise, n_bar)
+        ret_long = self.compute_ret_and_padding(data, period) + noise_ret
+
+        signal = pd.Series([0] * n_bar)
+        signal[ret_long > threshold] = 1
+        signal[ret_long < -threshold] = -1
+        position_pos = pd.Series([np.nan] * n_bar)
+        position_pos[0] = 0
+        position_pos[(signal == 1) & (data["next.ask"] > 0) & (data["next.bid"] > 0)] = 1
+        position_pos[(ret_long < -threshold) & (data["next.bid"] > 0)] = 0
+        position_pos.ffill(inplace=True)
+        pre_pos = position_pos.shift(1)
+        position_pos[(position_pos == 1) & (pre_pos == 1)] = np.nan  ## holding positio rather than trade, change to nan
+        position_pos[(position_pos == 1)] = 1 / data["next.ask"][(position_pos == 1)]  ## use 1/price as trading volume
+        position_pos.ffill(inplace=True)
+        position_neg = pd.Series([np.nan] * n_bar)
+        position_neg[0] = 0
+        position_neg[(signal == -1) & (data["next.ask"] > 0) & (data["next.bid"] > 0)] = -1
+        position_neg[(ret_long > threshold) & (data["next.ask"] > 0)] = 0
+        position_neg.ffill(inplace=True)
+        pre_neg = position_neg.shift(1)
+        position_neg[
+            (position_neg == -1) & (pre_neg == -1)] = np.nan  ## holding positio rather than trade, change to nan
+        position_neg[(position_neg == -1)] = -1 / data["next.bid"][
+            (position_neg == -1)]  ## use 1/price as trading volume
+        position_neg.ffill(inplace=True)  ## replace nan by trading volume
+        position = position_pos + position_neg
+
+        result = get_pnl_from_data_positions(data, position, tranct_ratio, tranct, date)
+
+        return result
 
 def to32int(df, cols):
     for col in cols:

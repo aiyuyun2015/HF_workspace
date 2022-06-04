@@ -25,11 +25,11 @@ CORE_NUM = int(os.environ['NUMBER_OF_PROCESSORS'])
 def compute_pnl_with_dask(all_dates, pnl_calculator, threshold,
                   product="rb", period=4096,
                   tranct_ratio=True, tranct=1.1e-4,
-                  noise=0, show=True):
+                  noise=0, show=True, notional=False):
     with dask.config.set(scheduler='processes', num_workers=CORE_NUM):
         f_par = functools.partial(pnl_calculator, product=product, period=period,
                                   tranct_ratio=tranct_ratio, threshold=threshold, tranct=tranct,
-                                  noise=noise)
+                                  noise=noise, notional=notional)
         result = compute([delayed(f_par)(date) for date in all_dates])[0]
     result = pd.concat(result)
     df = get_performance(result, 1, show)
@@ -88,6 +88,7 @@ def test_diff_in_shift_data(data, col):
     df = data.loc[mask][['date.time', f'next.{col}']]
     print(df)
     print(next_ask.loc[mask])
+
 
 def test_data(date):
     # open file
@@ -152,3 +153,18 @@ def test_fixed_size_pnl_one_file(date):
         print("Expected:\n", expected_df)
         print("Calculated:\n", df0)
     assert df0.equals(expected_df)
+
+
+def test_fixed_size_pnl_all_files(all_dates, noise=None, show=True):
+    calc = PnlCalculator()
+    df = compute_pnl_with_dask(all_dates, calc.get_daily_pnl, 0.002, period=4096, tranct_ratio=True,
+                               tranct=1.1e-4, noise=noise, show=show)
+    output_file = "pnl_test_with_noise.csv"
+    if not os.path.exists(output_file):
+        df.to_csv(output_file, index=False)
+    else:
+        expected_df = pd.read_csv(output_file)
+        if not df.equals(expected_df):
+            print("Expected:\n", expected_df)
+            print("Calculated:\n", df)
+        assert df.equals(expected_df)

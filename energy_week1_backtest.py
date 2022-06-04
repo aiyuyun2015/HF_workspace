@@ -21,15 +21,17 @@ from common import (load, get_sample_ret, parLapply,
                     get_performance, float_ndarray_equal,
                     EPSILON, add_bandwidth_2mask, PnlCalculator)
 from test_func import (compute_pnl_with_dask, test_data,
-                       test_fast_pnl_one_file, test_fixed_size_pnl_one_file)
+                       test_fast_pnl_one_file, test_fixed_size_pnl_one_file,
+                       test_fixed_size_pnl_all_files,)
 
 
 def main():
+
     # if DEBUG:
     #     global all_dates
     #     all_dates = all_dates[0:200]
     # First peek at the dataframe
-    if False:
+    if SLOW:
         test_data(all_dates[0])
 
     # Use one day, or half of the file for "fast" pnl test, there is no dask wrapper, or parallelization for it
@@ -39,33 +41,40 @@ def main():
 
     # With different thresholds result. Calling get_daily_pnl_fast, but with dask
     # we can see it's really bad
-    # we can try increasing threshold
-    #      sharpe   drawdown(%)       mar  win.ratio        num   avg.pnl  hld.period
-    # 0 -1.573017 -10089.004849 -0.009912   0.206379  91.104128 -2.008094  270.726907
-    if False:
+    # so try increasing threshold..
+    if SLOW:
+        print("Test fast pnl 0.001")
         compute_pnl_with_dask(all_dates, calc.get_daily_pnl_fast, 0.001)
 
     # increase threshold, better
-    #      sharpe   drawdown(%)      mar  win.ratio        num   avg.pnl  hld.period
-    # 0 -0.070633 -43661.478574 -0.00229   0.157598  13.758912 -0.302454  154.373219
-    if False:
-        compute_pnl_with_dask(all_dates, calc.get_daily_pnl_fast, 0.01)
-
     # Although it's profitable there are very few trades.
     # Now we use a different scheme.
+    if SLOW:
+        print("Test fast pnl 0.01")
+        df = compute_pnl_with_dask(all_dates, calc.get_daily_pnl_fast, 0.01)
+        assert df['sharpe'].values[0] - (-0.070633) < EPSILON
+        print("Test fast pnl 0.02")
+        compute_pnl_with_dask(all_dates, calc.get_daily_pnl_fast, 0.02)
+        assert df['sharpe'].values[0] - 0.890166 < EPSILON
+
     # In previous scheme, we close our position when the value is not strong enough.
     # It may close the positions too soon that it cannot cover transaction cost on average
     # So we change our backtest method to make it holding positions longer
-    #      sharpe  drawdown(%)       mar  win.ratio       num   avg.pnl  hld.period
-    # 0  0.890166  -2671.86471 -0.037427   0.047842  2.073171  9.972816  119.866968
-    if False:
-        compute_pnl_with_dask(all_dates, calc.get_daily_pnl_fast, 0.02)
 
-
+    # Better pnl with conservative strategy, less tradings
+    # chaning pnl calculator
     test_fixed_size_pnl_one_file(all_dates[0])
-    # df = compute_pnl_with_dask(all_dates, calc.get_daily_pnl, 0.001)
-    #df.to_csv("pnl_original.csv", index=False)
+    if True:
+        print("Test pnl (conservative) 0.001")
+        df = compute_pnl_with_dask(all_dates, calc.get_daily_pnl, 0.001, show=False)
+        assert df['sharpe'].values[0] - 27.186233 < EPSILON
 
+    # however, need to add noise..
+    # test_fixed_size_pnl_all_files(all_dates, noise=5, show=True)
+
+    # With fixed capital (1USD)
+    # keep notional true, however, never used.
+    #compute_pnl_with_dask(all_dates, calc.get_daily_pnl, 0.001, noise=0, notional=True)
     exit()
     # test-5
     with dask.config.set(scheduler='processes', num_workers=CORE_NUM):
@@ -90,6 +99,7 @@ def main():
 if __name__=='__main__':
     UNITTEST = True
     DEBUG = True
+    SLOW = True
     warnings.filterwarnings('ignore')
     os.chdir(DATA_PATH)
     os.getcwd()
