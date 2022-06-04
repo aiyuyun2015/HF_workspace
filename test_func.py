@@ -144,7 +144,7 @@ def test_fixed_size_pnl_one_file(date):
     calc = PnlCalculator()
     df0 = calc.get_daily_pnl(date, product="rb", period=4096,
                              tranct_ratio=True, threshold=0.001,
-                             tranct=1.1e-4)
+                             tranct=1.1e-4, noise=0, notional=None)
 
     output_file = DATA_PATH + "rb_fixed_size_pnl_data_" + date.split('.')[0]+".csv"
     expected_df = pd.read_csv(output_file)
@@ -153,12 +153,14 @@ def test_fixed_size_pnl_one_file(date):
         print("Expected:\n", expected_df)
         print("Calculated:\n", df0)
     assert df0.equals(expected_df)
+    print("Test ok.")
 
 
 def test_fixed_size_pnl_all_files(all_dates, noise=None, show=True):
     calc = PnlCalculator()
-    df = compute_pnl_with_dask(all_dates, calc.get_daily_pnl, 0.002, period=4096, tranct_ratio=True,
-                               tranct=1.1e-4, noise=noise, show=show)
+    df = compute_pnl_with_dask(all_dates, calc.get_daily_pnl, 0.002, period=4096,
+                               tranct_ratio=True, tranct=1.1e-4,
+                               noise=noise, show=show)
     output_file = "pnl_test_with_noise.csv"
     if not os.path.exists(output_file):
         df.to_csv(output_file, index=False)

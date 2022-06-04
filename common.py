@@ -116,7 +116,6 @@ class PnlCalculator(object):
         self.threshold = None
         self.tranct = None
         self.noise = None
-        np.random.seed(10)
         self.ori_data = None
         self.middle_day_points = None
         self.data = {}
@@ -160,11 +159,12 @@ class PnlCalculator(object):
         temp = cPickle.loads(raw_data)
         mask = temp["good"]
         self.data[date] = temp[mask].reset_index(drop=True)
-        self.n_bar[date] = len(self.data)
+        self.n_bar[date] = len(self.data[date])
         self.unit[date] = np.std(self.data[date]["ret"])
         return self.data[date]
 
     def compute_noise(self, date, noise):
+        np.random.seed(10)
         self.noise_ret = np.random.normal(scale=self.unit[date] * noise, size=self.n_bar[date])
         return self.noise_ret
 
@@ -195,8 +195,10 @@ class PnlCalculator(object):
         result = get_pnl_from_data_positions(data, position, tranct_ratio, tranct,date)
         return result
 
-    def get_daily_pnl(self, date, product='rb', period=2000, tranct_ratio=False,
-                      threshold=0.001, tranct=1.1e-4, noise=0, notional=False):
+    # def get_daily_pnl(self, date, product='rb', period=2000, tranct_ratio=False,
+    #                   threshold=0.001, tranct=1.1e-4, noise=0, notional=False):
+    def get_daily_pnl(self, date, product=None, period=None, tranct_ratio=None,
+                      threshold=None, tranct=None, noise=None, notional=None):
         data = self.read_from_date(date)
         n_bar = self.n_bar
         noise_ret = self.compute_noise(date, noise)

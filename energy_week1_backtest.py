@@ -63,17 +63,22 @@ def main():
 
     # Better pnl with conservative strategy, less tradings
     # chaning pnl calculator
+    print("Test pnl (conservative) one day")
     test_fixed_size_pnl_one_file(all_dates[0])
-    if True:
+
+    if SLOW:
         print("Test pnl (conservative) 0.001")
         df = compute_pnl_with_dask(all_dates, calc.get_daily_pnl, 0.001, show=False)
         assert df['sharpe'].values[0] - 27.186233 < EPSILON
 
     # however, need to add noise..
-    # test_fixed_size_pnl_all_files(all_dates, noise=5, show=True)
+    if SLOW:
+        print("Test pnl (conservative) 0.001 with noise=5")
+        test_fixed_size_pnl_all_files(all_dates, noise=5, show=True)
 
     # With fixed capital (1USD)
     # keep notional true, however, never used.
+    print("Test capital fixed")
     #compute_pnl_with_dask(all_dates, calc.get_daily_pnl, 0.001, noise=0, notional=True)
     exit()
     # test-5
@@ -99,7 +104,7 @@ def main():
 if __name__=='__main__':
     UNITTEST = True
     DEBUG = True
-    SLOW = True
+    SLOW = False
     warnings.filterwarnings('ignore')
     os.chdir(DATA_PATH)
     os.getcwd()
