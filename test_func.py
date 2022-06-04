@@ -1,8 +1,17 @@
+import warnings
+import os
 import pandas as pd
 import numpy as np
+import math
+import _pickle as cPickle
+import gzip
+import matplotlib.pyplot as plt
+import statsmodels.tsa.stattools as ts
+import functools
 import dask
 from dask import compute, delayed
-import functools
+from itertools import chain
+from collections import OrderedDict
 from common import (load, get_sample_ret, parLapply,
                     DATA_PATH, product_list, product,
                     compute, get_daily_pnl_fast,
@@ -11,12 +20,17 @@ from common import (load, get_sample_ret, parLapply,
                     get_performance, float_ndarray_equal,
                     EPSILON, add_bandwidth_2mask)
 
+CORE_NUM = int(os.environ['NUMBER_OF_PROCESSORS'])
 
-def test_fast_pnl(all_dates, threshold=0.001, show=True):
+
+def compute_pnl_with_dask(all_dates, pnl_calculator, threshold,
+                  product="ru", period=4096,
+                  tranct_ratio=True, tranct=1.1e-4,
+                  noise=0, show=True):
     with dask.config.set(scheduler='processes', num_workers=CORE_NUM):
-        f_par = functools.partial(get_daily_pnl_fast, product="ru", period=4096,
-                                  tranct_ratio=True, threshold=threshold, tranct=1.1e-4,
-                                  noise=0)
+        f_par = functools.partial(pnl_calculator, product=product, period=period,
+                                  tranct_ratio=tranct_ratio, threshold=threshold, tranct=tranct,
+                                  noise=noise)
         result = compute([delayed(f_par)(date) for date in all_dates])[0]
     result = pd.concat(result)
     df1 = get_performance(result, 1, show)
@@ -74,3 +88,49 @@ def test_diff_in_shift_data(data, col):
     df = data.loc[mask][['date.time', f'next.{col}']]
     print(df)
     print(next_ask.loc[mask])
+
+def test_data(date):
+    # open file
+    #date = '20190611'
+    input_file = dire + "/" + date + ".pkl"
+    with gzip.open(input_file, 'rb', compresslevel=1) as file_object:
+        raw_data = file_object.read()
+    print(f"Load {input_file}")
+    data = cPickle.loads(raw_data)
+    wpr = compute_wpr(data)
+    log_price = np.log(data['wpr'])
+    mid_price = (data['bid'] + data['ask'])/2.0
+    assert float_ndarray_equal(wpr, data['wpr'])
+    assert float_ndarray_equal(log_price, data['log.price'])
+    assert float_ndarray_equal(mid_price, data['mid.price'])
+
+    # Next checking ret with functions.. need to mask the first trade in the opening
+    # The conclusion is, there is only one data point 15:00 has issue, weird. Cuz???
+    # TODO: maybe think about why 15:00 has issue.
+    # wpr.ret is a bit tricky. Note wpr.ret = wpr.diff(1)
+    # The annoying part is the first data point in the opening of
+    # trade session, overall it's fine after checkings; also, take a look at the way how the data is saved.
+    wpr_ret = data['wpr'].diff(1)
+    test_wprret_computation(data, wpr_ret, 'wpr.ret', verbose=False)
+
+    # ret defined as np.log(wpr).diff(1)
+    log_wpr_ret = np.log(data['wpr']).diff(1)
+    test_wprret_computation(data, log_wpr_ret, 'ret', verbose=False)
+
+    # next.ask, next.bid is simply the ask and bid price shift(-1)
+    test_diff_in_shift_data(data, 'ask')
+    test_diff_in_shift_data(data, 'bid')
+
+    # TODO: check min.1024, etc.
+    # min_1024 = data['wpr'].rolling(1024).min()
+
+
+def test_fast_pnl_one_file(date):
+    # test-0
+    df0 = get_daily_pnl_fast(date, product="ru", period=4096,
+                             tranct_ratio=True, threshold=0.001,
+                             tranct=1.1e-4)
+
+    output_file = DATA_PATH + "fast_data.csv"
+    assert df0.equals(pd.read_csv(output_file))
+    print(df0)

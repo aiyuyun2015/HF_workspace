@@ -21,73 +21,27 @@ from common import (load, get_sample_ret, parLapply,
                     adf_kpss, sample_for_stationarity,
                     get_performance, float_ndarray_equal,
                     EPSILON, add_bandwidth_2mask)
-from test_func import (test_fast_pnl, test_wprret_computation, test_diff_in_shift_data )
+from test_func import (compute_pnl_with_dask, test_data,
+                       test_fast_pnl_one_file)
 
 
-def test_data():
-    # open file
-    #date = '20190611'
-    input_file = dire + "/" + date + ".pkl"
-    with gzip.open(input_file, 'rb', compresslevel=1) as file_object:
-        raw_data = file_object.read()
-    print(f"Load {input_file}")
-    data = cPickle.loads(raw_data)
-    wpr = compute_wpr(data)
-    log_price = np.log(data['wpr'])
-    mid_price = (data['bid'] + data['ask'])/2.0
-    assert float_ndarray_equal(wpr, data['wpr'])
-    assert float_ndarray_equal(log_price, data['log.price'])
-    assert float_ndarray_equal(mid_price, data['mid.price'])
-
-    # Next checking ret with functions.. need to mask the first trade in the opening
-    # The conclusion is, there is only one data point 15:00 has issue, weird. Cuz???
-    # TODO: maybe think about why 15:00 has issue.
-    # wpr.ret is a bit tricky. Note wpr.ret = wpr.diff(1)
-    # The annoying part is the first data point in the opening of
-    # trade session, overall it's fine after checkings; also, take a look at the way how the data is saved.
-    wpr_ret = data['wpr'].diff(1)
-    test_wprret_computation(data, wpr_ret, 'wpr.ret', verbose=False)
-
-    # ret defined as np.log(wpr).diff(1)
-    log_wpr_ret = np.log(data['wpr']).diff(1)
-    test_wprret_computation(data, log_wpr_ret, 'ret', verbose=False)
-
-    # next.ask, next.bid is simply the ask and bid price shift(-1)
-    test_diff_in_shift_data(data, 'ask')
-    test_diff_in_shift_data(data, 'bid')
-
-    # TODO: check min.1024, etc.
-    # min_1024 = data['wpr'].rolling(1024).min()
-
-
-
-
-
-def test_fast_pnl_one_file():
-    # test-0
-    df0 = get_daily_pnl_fast(all_dates[0], product="ru", period=4096,
-                             tranct_ratio=True, threshold=0.001,
-                             tranct=1.1e-4)
-    if UNITTEST:
-        output_file = DATA_PATH + "fast_data.csv"
-        assert df0.equals(pd.read_csv(output_file))
-        print(df0)
-
+def test_fast_pnl_all_dates_different_thresholds(thresholds):
+    for thrd in thresholds:
+        df = compute_pnl_with_dask(all_dates, get_daily_pnl_fast, thrd)
+        print(df)
 
 def main():
 
-    test_data()
-    exit()
-    test_fast_pnl_one_file()
+    # First peek at the dataframe
+    test_data(date)
 
-    # test-1, different thresholds result.
+    # Use one day, or half of the file for "fast" pnl test, there is no dask wrapper, or parallelization for it
+    # purely calling get_daily_pnl_fast
+    test_fast_pnl_one_file(all_dates[0])
+
+    # With different thresholds result. Calling get_daily_pnl_fast, but with dask
     thresholds = [0.001, 0.01, 0.02]
-    if DEBUG:
-        thresholds = [0.02]
-
-    for thrd in thresholds:
-        df = test_fast_pnl(all_dates, thrd)
-        print(df)
+    test_fast_pnl_all_dates_different_thresholds(thresholds)
 
     exit()
     # test-4
@@ -123,7 +77,6 @@ if __name__=='__main__':
     DEBUG = True
     warnings.filterwarnings('ignore')
     os.chdir(DATA_PATH)
-    CORE_NUM = int(os.environ['NUMBER_OF_PROCESSORS'])
     os.getcwd()
     all_dates = list(map(lambda x: x, os.listdir(DATA_PATH + product)))
     len(all_dates)

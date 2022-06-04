@@ -18,19 +18,12 @@ dire = os.path.join(DATA_PATH, product)
 EPSILON = 1e-5
 
 
-# def float_ndarray_equal(x, y, EPSILON=1e-5):
-#     if isinstance(pd.Series, x):
-#         x = x.values
-#     if isinstance(pd.Series, y):
-#         y = y.values
-#
-#     diff = (np.abs(x - y) < EPSILON).all()
-#     return diff
 def add_bandwidth_2mask(mask, size=5):
     ans = np.zeros_like(mask)
     for i in range(-size, size+1, 1):
         ans = np.logical_or(ans, mask.shift(i, fill_value=False).values)
     return ans
+
 
 def float_ndarray_equal(*args):
     if len(args) < 1:
@@ -194,9 +187,6 @@ def get_daily_pnl_fast(date, product="rb", period=4096, tranct_ratio=False, thre
     return result
 
 
-from collections import OrderedDict
-
-
 def to32int(df, cols):
     for col in cols:
         df[col] = df[col].astype(np.int32)
@@ -256,6 +246,10 @@ def get_performance(result, spread=1, show=False):
     return pd.DataFrame(summary, index=[0]) # pd.DataFrame([summary])
 
 
+## backtest use good method
+from collections import OrderedDict
+
+
 def get_daily_pnl(date, product="rb", period=2000, tranct_ratio=False, threshold=0.001, tranct=1.1e-4, noise=0):
     with gzip.open(dire + "/" + date, 'rb', compresslevel=1) as file_object:
         raw_data = file_object.read()
@@ -308,67 +302,3 @@ def get_daily_pnl(date, product="rb", period=2000, tranct_ratio=False, threshold
     result = OrderedDict(
         [("date", date), ("final.pnl", final_pnl), ("turnover", turnover), ("num", num), ("hld.period", hld_period)])
     return result
-
-
-def get_daily_pnl(date, product="rb", period=2000, tranct_ratio=False, threshold=0.001, tranct=1.1e-4, noise=0,
-                  notional=False):
-    with gzip.open(dire + "/" + date, 'rb', compresslevel=1) as file_object:
-        raw_data = file_object.read()
-    data = cPickle.loads(raw_data)
-    data = data[data["good"]].reset_index(drop=True)
-    n_bar = len(data)
-    unit = np.std(data["ret"])
-    np.random.seed(10)
-    noise_ret = np.random.normal(scale=unit * noise, size=n_bar)
-    ##  we repeat the above code to get daily result
-    ret_2000 = (data["ret"].rolling(period).sum()).dropna().reset_index(drop=True)
-    ret_2000 = ret_2000.append(pd.Series([0] * (len(data) - len(ret_2000)))).reset_index(drop=True) + noise_ret
-    signal = pd.Series([0] * n_bar)
-    signal[ret_2000 > threshold] = 1
-    signal[ret_2000 < -threshold] = -1
-    position_pos = pd.Series([np.nan] * n_bar)
-    position_pos[0] = 0
-    position_pos[(signal == 1) & (data["next.ask"] > 0) & (data["next.bid"] > 0)] = 1
-    position_pos[(ret_2000 < -threshold) & (data["next.bid"] > 0)] = 0
-    position_pos.ffill(inplace=True)
-    pre_pos = position_pos.shift(1)
-    position_pos[(position_pos == 1) & (pre_pos == 1)] = np.nan  ## holding positio rather than trade, change to nan
-    position_pos[(position_pos == 1)] = 1 / data["next.ask"][(position_pos == 1)]  ## use 1/price as trading volume
-    position_pos.ffill(inplace=True)
-    position_neg = pd.Series([np.nan] * n_bar)
-    position_neg[0] = 0
-    position_neg[(signal == -1) & (data["next.ask"] > 0) & (data["next.bid"] > 0)] = -1
-    position_neg[(ret_2000 > threshold) & (data["next.ask"] > 0)] = 0
-    position_neg.ffill(inplace=True)
-    pre_neg = position_neg.shift(1)
-    position_neg[(position_neg == -1) & (pre_neg == -1)] = np.nan  ## holding positio rather than trade, change to nan
-    position_neg[(position_neg == -1)] = -1 / data["next.bid"][(position_neg == -1)]  ## use 1/price as trading volume
-    position_neg.ffill(inplace=True)  ## replace nan by trading volume
-    position = position_pos + position_neg
-    position[0] = 0
-    position[n_bar - 1] = 0
-    position[n_bar - 2] = 0
-    change_pos = position - position.shift(1)
-    change_pos[0] = 0
-    change_base = pd.Series([0] * n_bar)
-    change_buy = change_pos > 0
-    change_sell = change_pos < 0
-
-    if (tranct_ratio):
-        change_base[change_buy] = data["next.ask"][change_buy] * (1 + tranct)
-        change_base[change_sell] = data["next.bid"][change_sell] * (1 - tranct)
-    else:
-        change_base[change_buy] = data["next.ask"][change_buy] + tranct
-        change_base[change_sell] = data["next.bid"][change_sell] - tranct
-    final_pnl = -sum(change_base * change_pos)
-    turnover = sum(change_base * abs(change_pos))
-    num = sum((position != 0) & (change_pos != 0))
-    hld_period = sum(position != 0)
-
-    ## finally we combine the statistics into a data frame
-    # result = pd.DataFrame({"final.pnl": final_pnl, "turnover": turnover, "num": num, "hld.period": hld_period}, index=[0])
-    # result = {"date": date, "final.pnl": final_pnl, "turnover": turnover, "num": num, "hld.period": hld_period}
-    result = OrderedDict(
-        [("date", date), ("final.pnl", final_pnl), ("turnover", turnover), ("num", num), ("hld.period", hld_period)])
-    return result
-
