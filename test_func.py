@@ -25,14 +25,15 @@ CORE_NUM = int(os.environ['NUMBER_OF_PROCESSORS'])
 def compute_pnl_with_dask(all_dates, pnl_calculator, threshold,
                   product="rb", period=4096,
                   tranct_ratio=True, tranct=1.1e-4,
-                  noise=0, show=True, notional=False):
+                  noise=0, show=False, notional=False, capital=1):
     with dask.config.set(scheduler='processes', num_workers=CORE_NUM):
         f_par = functools.partial(pnl_calculator, product=product, period=period,
                                   tranct_ratio=tranct_ratio, threshold=threshold, tranct=tranct,
-                                  noise=noise, notional=notional)
+                                  noise=noise, notional=notional, capital=capital)
         result = compute([delayed(f_par)(date) for date in all_dates])[0]
     result = pd.concat(result)
     df = get_performance(result, 1, show)
+    print("Performance:")
     print(df)
     return df
 
@@ -166,7 +167,7 @@ def test_fixed_size_pnl_all_files(all_dates, noise=None, show=True):
         df.to_csv(output_file, index=False)
     else:
         expected_df = pd.read_csv(output_file)
-        if not df.equals(expected_df):
+        if (df - expected_df).sum().sum() > EPSILON:
             print("Expected:\n", expected_df)
             print("Calculated:\n", df)
-        assert df.equals(expected_df)
+        assert (df - expected_df).sum().sum() < EPSILON

@@ -26,6 +26,11 @@ def add_bandwidth_2mask(mask, size=5):
     return ans
 
 
+def float_equal(x, y):
+    if np.abs(x - y) > EPSILON:
+        print(x, y)
+    assert np.abs(x - y) < EPSILON
+
 def float_ndarray_equal(*args):
     if len(args) < 1:
         print("Warning: length must greater than 1")
@@ -178,16 +183,30 @@ class PnlCalculator(object):
         return position
 
     @staticmethod
-    def conservative_strategy(data, ret_long, threshold):
+    def conservative_strategy(data, ret_long, threshold, capital=None):
         mask_pos = (ret_long > threshold) & (data['next.ask'] > 0) & (data['next.bid'] > 0)
         mask_neg = (ret_long < -threshold) & (data['next.ask'] > 0) & (data['next.bid'] > 0)
         signal = np.where(mask_pos, 1, np.where(mask_neg, -1, np.nan))
         position = pd.Series(signal)
         position = position.fillna(method='ffill').fillna(0)
+
+        if capital:
+            #print(f"Running fixed capital {capital}")
+            # make unchanged position np.nan
+            position = np.where(position.diff(1) == 0, np.nan, position)
+            position = np.where(position == 1, capital / data['next.ask'],
+                                np.where(position == -1,  -capital / data['next.bid'], np.nan))
+            position = pd.Series(position)
+            position = position.fillna(method='ffill').fillna(0)
+        else:
+            pass
+            #print("No capital set! None")
+
         return position
 
     # TODO: think about how to make the arguments aligned, ... we have three PNL computation functions
-    def get_daily_pnl_fast(self, date, product="rb", period=4096, tranct_ratio=False, threshold=0.001, tranct=0.21, noise=0, notional=False):
+    def get_daily_pnl_fast(self, date, product="rb", period=4096, tranct_ratio=False, threshold=0.001, tranct=0.21,
+                           noise=0, notional=False, capital=None):
         data = self.read_from_date(date)
         # signal has three values: 1, 0, -1 --> price is too low, medium, high
         ret_long = self.compute_ret_and_padding(data, period)
@@ -195,15 +214,12 @@ class PnlCalculator(object):
         result = get_pnl_from_data_positions(data, position, tranct_ratio, tranct,date)
         return result
 
-    # def get_daily_pnl(self, date, product='rb', period=2000, tranct_ratio=False,
-    #                   threshold=0.001, tranct=1.1e-4, noise=0, notional=False):
+
     def get_daily_pnl(self, date, product=None, period=None, tranct_ratio=None,
-                      threshold=None, tranct=None, noise=None, notional=None):
+                      threshold=None, tranct=None, noise=None, notional=None, capital=None):
         data = self.read_from_date(date)
-        n_bar = self.n_bar
         noise_ret = self.compute_noise(date, noise)
         ret_long = self.compute_ret_and_padding(data, period) + noise_ret
-        # # TODO: why here, there is no next.ask checking?
         position = self.conservative_strategy(data, ret_long, threshold)
         result = get_pnl_from_data_positions(data, position, tranct_ratio, tranct, date)
 
@@ -211,43 +227,49 @@ class PnlCalculator(object):
 
     ## daily pnl of fixed capital
     def get_daily_pnl_fixed_capital(self, date, product=None, period=None, tranct_ratio=None,
-                                   threshold=None, tranct=None, noise=None, notional=None):
+                                   threshold=None, tranct=None, noise=None, notional=None, capital=None):
         data = self.read_from_date(date)
-        n_bar = self.n_bar[date]
         noise_ret = self.compute_noise(date, noise)
         ret_long = self.compute_ret_and_padding(data, period) + noise_ret
 
-        signal = pd.Series([0] * n_bar)
-        signal[ret_long > threshold] = 1
-        signal[ret_long < -threshold] = -1
-        position_pos = pd.Series([np.nan] * n_bar)
-        position_pos[0] = 0
-        position_pos[(signal == 1) & (data["next.ask"] > 0) & (data["next.bid"] > 0)] = 1
-        position_pos[(ret_long < -threshold) & (data["next.bid"] > 0)] = 0
-        position_pos.ffill(inplace=True)
-
-        pre_pos = position_pos.shift(1)
-
-        position_pos[(position_pos == 1) & (pre_pos == 1)] = np.nan  ## holding positio rather than trade, change to nan
-        position_pos[(position_pos == 1)] = 1 / data["next.ask"][(position_pos == 1)]  ## use 1/price as trading volume
-        position_pos.ffill(inplace=True)
-
-        position_neg = pd.Series([np.nan] * n_bar)
-        position_neg[0] = 0
-        position_neg[(signal == -1) & (data["next.ask"] > 0) & (data["next.bid"] > 0)] = -1
-        position_neg[(ret_long > threshold) & (data["next.ask"] > 0)] = 0
-        position_neg.ffill(inplace=True)
-        pre_neg = position_neg.shift(1)
-        position_neg[
-            (position_neg == -1) & (pre_neg == -1)] = np.nan  ## holding positio rather than trade, change to nan
-        position_neg[(position_neg == -1)] = -1 / data["next.bid"][
-            (position_neg == -1)]  ## use 1/price as trading volume
-        position_neg.ffill(inplace=True)  ## replace nan by trading volume
-        position = position_pos + position_neg
+        # n_bar = self.n_bar[date]
+        # signal = pd.Series([0] * n_bar)
+        # signal[ret_long > threshold] = 1
+        # signal[ret_long < -threshold] = -1
+        # position_pos = pd.Series([np.nan] * n_bar)
+        # position_pos[0] = 0
+        # position_pos[(signal == 1) & (data["next.ask"] > 0) & (data["next.bid"] > 0)] = 1
+        # position_pos[(ret_long < -threshold) & (data["next.bid"] > 0)] = 0
+        # position_pos.ffill(inplace=True)
+        #
+        # pre_pos = position_pos.shift(1)
+        # position_pos[(position_pos == 1) & (pre_pos == 1)] = np.nan  ## holding positio rather than trade, change to nan
+        # position_pos[(position_pos == 1)] = 1 / data["next.ask"][(position_pos == 1)]  ## use 1/price as trading volume
+        # position_pos.ffill(inplace=True)
+        #
+        # position_neg = pd.Series([np.nan] * n_bar)
+        # position_neg[0] = 0
+        # position_neg[(signal == -1) & (data["next.ask"] > 0) & (data["next.bid"] > 0)] = -1
+        # position_neg[(ret_long > threshold) & (data["next.ask"] > 0)] = 0
+        # position_neg.ffill(inplace=True)
+        #
+        # pre_neg = position_neg.shift(1)
+        # position_neg[
+        #     (position_neg == -1) & (pre_neg == -1)] = np.nan  ## holding positio rather than trade, change to nan
+        # position_neg[(position_neg == -1)] = -1 / data["next.bid"][
+        #     (position_neg == -1)]  ## use 1/price as trading volume
+        # position_neg.ffill(inplace=True)  ## replace nan by trading volume
+        #
+        # position = position_pos + position_neg
+        position = self.conservative_strategy(data, ret_long, threshold, capital=capital)
+        # if not (np.abs(position2 - position) < EPSILON).all():
+        #     print(f"date {date}")
+        #     assert False
 
         result = get_pnl_from_data_positions(data, position, tranct_ratio, tranct, date)
 
         return result
+
 
 def to32int(df, cols):
     for col in cols:
