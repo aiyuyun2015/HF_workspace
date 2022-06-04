@@ -110,29 +110,7 @@ def parLapply(CORE_NUM, iterable, func, *args, **kwargs):
     return result
 
 
-def compute_ret_and_padding(data, period):
-    '''
-    Short version, the code computes
 
-    np.log(wpr(t+period) - wpr(t)).fillna(0)
-
-    Long version:
-    This seems to be a simple task. But the author is crazy.
-    What he did id too complicated, in a weird way. He used ret.rolling.
-    Note, ret.rolling = np.log(wpr).diff(). But, he has the data.iloc[0][ret]!! Some missing data is dropped at the
-    first place.
-    Thus, I cannot simplily refactor the code, with the wrp or wpr.log .. Only dropped some syntax that's not pretty.
-
-    :param data:
-    :param period:
-    :return:
-    '''
-    ret = data['ret']
-    ret_long = ret.rolling(period).sum().dropna()  ## future return, used as signal
-    num_of_zeros = len(data) - len(ret_long)
-    zeros = pd.Series([0] * num_of_zeros)
-    ret_long = pd.concat([ret_long, zeros])
-    return ret_long.reset_index(drop=True)
 
 
 class PnlCalculator(object):
@@ -148,6 +126,31 @@ class PnlCalculator(object):
         self.n_bar = None
         self.unit = None
         self.noise_ret = None
+
+    @staticmethod
+    def compute_ret_and_padding(data, period):
+        '''
+        Short version, the code computes
+
+        np.log(wpr(t+period) - wpr(t)).fillna(0)
+
+        Long version:
+        This seems to be a simple task. But the author is crazy.
+        What he did id too complicated, in a weird way. He used ret.rolling.
+        Note, ret.rolling = np.log(wpr).diff(). But, he has the data.iloc[0][ret]!! Some missing data is dropped at the
+        first place.
+        Thus, I cannot simplily refactor the code, with the wrp or wpr.log .. Only dropped some syntax that's not pretty.
+
+        :param data:
+        :param period:
+        :return:
+        '''
+        ret = data['ret']
+        ret_long = ret.rolling(period).sum().dropna()  ## future return, used as signal
+        num_of_zeros = len(data) - len(ret_long)
+        zeros = pd.Series([0] * num_of_zeros)
+        ret_long = pd.concat([ret_long, zeros])
+        return ret_long.reset_index(drop=True)
 
     def read_from_date(self, date, product):
         with gzip.open(dire+"/"+date, 'rb', compresslevel=1) as file_object:
@@ -165,17 +168,29 @@ class PnlCalculator(object):
         self.noise_ret = np.random.normal(scale=self.unit * self.noise, size=self.n_bar)
         return self.noise_ret
 
-    def get_daily_pnl_fast(self, date, product="rb", period=4096, tranct_ratio=False, threshold=0.001, tranct=0.21):
-        data = self.read_from_date(date, product)
-        # signal has three values: 1, 0, -1 --> price is too low, medium, high
-        ret_long = compute_ret_and_padding(data, period)
-
+    @staticmethod
+    def agressive_strategy( data, ret_long, threshold):
         mask_pos = (ret_long > threshold) & (np.array(data["next.ask"]) > 0)
         mask_neg = (ret_long < -threshold) & (np.array(data["next.bid"]) > 0)
         signal = np.where(mask_pos, 1, np.where(mask_neg, -1, 0))
         # convert to series.. for his weird syntax consistency
         position = pd.Series(signal)
+        return position
 
+    @staticmethod
+    def conservative_strategy(data, ret_long, threshold):
+        mask_pos = (ret_long > threshold) & (data['next.ask'] > 0) & (data['next.bid'] > 0)
+        mask_neg = (ret_long < -threshold) & (data['next.ask'] > 0) & (data['next.bid'] > 0)
+        signal = np.where(mask_pos, 1, np.where(mask_neg, -1, np.nan))
+        position = pd.Series(signal)
+        position = position.fillna(method='ffill').fillna(0)
+        return position
+
+    def get_daily_pnl_fast(self, date, product="rb", period=4096, tranct_ratio=False, threshold=0.001, tranct=0.21, noise=0):
+        data = self.read_from_date(date, product)
+        # signal has three values: 1, 0, -1 --> price is too low, medium, high
+        ret_long = self.compute_ret_and_padding(data, period)
+        position = self.agressive_strategy(data, ret_long, threshold)
         result = get_pnl_from_data_positions(data, position, tranct_ratio, tranct,date)
         return result
 
@@ -185,29 +200,10 @@ class PnlCalculator(object):
         data = self.read_from_date(date, product)
         n_bar = self.n_bar
         noise_ret = self.compute_noise(noise, n_bar)
-        ret_2000 = compute_ret_and_padding(data, period) + noise_ret
-
+        ret_long = self.compute_ret_and_padding(data, period) + noise_ret
         # # TODO: why here, there is no next.ask checking?
-        mask_pos = (ret_2000 > threshold) #& (np.array(data["next.ask"]) > 0)
-        mask_neg = (ret_2000 < -threshold) #& (np.array(data["next.bid"]) > 0)
-        signal = np.where(mask_pos, 1, np.where(mask_neg, -1, 0))
-
-        position_pos = pd.Series([np.nan] * n_bar)
-        position_pos[0] = 0
-        position_pos[(signal == 1) & (data["next.ask"] > 0) & (data["next.bid"] > 0)] = 1  ## if signal==1, position_pos=1
-        position_pos[(signal == -1) & (data["next.bid"] > 0)] = 0  ## if ret< -threshold, position_pos=0
-        position_pos.ffill(inplace=True)
-
-        position_neg = pd.Series([np.nan] * n_bar)
-        position_neg[0] = 0
-        position_neg[
-            (signal == -1) & (data["next.ask"] > 0) & (data["next.bid"] > 0)] = -1  ## if signal==-1, position_neg=-1
-        position_neg[(ret_2000 > threshold) & (data["next.ask"] > 0)] = 0  ## if ret> threshold, position_neg=0
-        position_neg.ffill(inplace=True)
-
-        position = position_pos + position_neg  ## total position
-
-        result = get_pnl_from_data_positions(data, position, tranct_ratio, tranct,date)
+        position = self.conservative_strategy(data, ret_long, threshold)
+        result = get_pnl_from_data_positions(data, position, tranct_ratio, tranct, date)
 
         return result
 
@@ -227,18 +223,6 @@ def pnl_drawdown(s):
 
 
 def get_performance(result, spread=1, show=False):
-    # Note1, np.rec.fromrecord, will create a "record array"
-    # Note2, result.values --> returns a nd.array, dimension = row * col
-    # The usage of record array, is to provide a mimic c-type structure
-    # x = np.array([('Rex', 9, 81.0), ('Fido', 3, 27.0)],
-    #              dtype=[('name', 'U10'), ('age', 'i4'), ('weight', 'f4')])
-    # x
-    # array([('Rex', 9, 81.), ('Fido', 3, 27.)],
-    #       dtype=[('name', 'U10'), ('age', '<i4'), ('weight', '<f4')])
-    # In the above example, as you can see, there are three "objects" saved in the array, first one
-    # is name, with less than 10 chars
-    # second, age, integer 4*8 = 32 bit
-    # thrid float, 4*8 = 32 bit
     stat = result.reset_index()
     stat['date'] = stat['date'].map(lambda x: x.split('.')[0])
     stat['date'] = pd.to_datetime(stat['date'])
@@ -270,8 +254,6 @@ def get_performance(result, spread=1, show=False):
                  "mar": mar, "win.ratio": win_ratio, "num": num,
                  "avg.pnl": avg_pnl, "hld.period": hld_period}
     return pd.DataFrame(summary, index=[0]) # pd.DataFrame([summary])
-
-
 
 
 def get_pnl_from_data_positions(data, position, tranct_ratio, tranct, date):

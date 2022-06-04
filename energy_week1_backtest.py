@@ -34,7 +34,7 @@ def main():
 
     # Use one day, or half of the file for "fast" pnl test, there is no dask wrapper, or parallelization for it
     # simply calling get_daily_pnl_fast
-
+    calc = PnlCalculator()
     test_fast_pnl_one_file(all_dates[0])
 
     # With different thresholds result. Calling get_daily_pnl_fast, but with dask
@@ -43,13 +43,13 @@ def main():
     #      sharpe   drawdown(%)       mar  win.ratio        num   avg.pnl  hld.period
     # 0 -1.573017 -10089.004849 -0.009912   0.206379  91.104128 -2.008094  270.726907
     if False:
-        compute_pnl_with_dask(all_dates, get_daily_pnl_fast, 0.001)
+        compute_pnl_with_dask(all_dates, calc.get_daily_pnl_fast, 0.001)
 
     # increase threshold, better
     #      sharpe   drawdown(%)      mar  win.ratio        num   avg.pnl  hld.period
     # 0 -0.070633 -43661.478574 -0.00229   0.157598  13.758912 -0.302454  154.373219
     if False:
-        compute_pnl_with_dask(all_dates, get_daily_pnl_fast, 0.01)
+        compute_pnl_with_dask(all_dates, calc.get_daily_pnl_fast, 0.01)
 
     # Although it's profitable there are very few trades.
     # Now we use a different scheme.
@@ -59,13 +59,12 @@ def main():
     #      sharpe  drawdown(%)       mar  win.ratio       num   avg.pnl  hld.period
     # 0  0.890166  -2671.86471 -0.037427   0.047842  2.073171  9.972816  119.866968
     if False:
-        compute_pnl_with_dask(all_dates, get_daily_pnl_fast, 0.02)
+        compute_pnl_with_dask(all_dates, calc.get_daily_pnl_fast, 0.02)
 
 
     test_fixed_size_pnl_one_file(all_dates[0])
-    calc = PnlCalculator()
-    compute_pnl_with_dask(all_dates, calc.get_daily_pnl, 0.001, product='rb' )
-
+    # df = compute_pnl_with_dask(all_dates, calc.get_daily_pnl, 0.001)
+    #df.to_csv("pnl_original.csv", index=False)
 
     exit()
     # test-5
