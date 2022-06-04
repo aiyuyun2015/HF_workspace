@@ -79,6 +79,10 @@ def main():
     # With fixed capital (1USD)
     # keep notional true, however, never used.
     print("Test capital fixed")
+    df = calc.get_daily_pnl_fixed_capital(all_dates[0], product="ru", period=4096,
+                                     tranct_ratio=True, threshold=0.001,
+                                     tranct=1.1e-4, notional=True, noise=0)
+    print(df)
     #compute_pnl_with_dask(all_dates, calc.get_daily_pnl, 0.001, noise=0, notional=True)
     exit()
     # test-5

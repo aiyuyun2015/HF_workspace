@@ -210,11 +210,11 @@ class PnlCalculator(object):
         return result
 
     ## daily pnl of fixed capital
-    def get_daily_pnl_fixed_capital(self, date, product="rb", period=2000, tranct_ratio=False,
-                                   threshold=0.001, tranct=1.1e-4, noise=0, notional=False):
+    def get_daily_pnl_fixed_capital(self, date, product=None, period=None, tranct_ratio=None,
+                                   threshold=None, tranct=None, noise=None, notional=None):
         data = self.read_from_date(date)
-        n_bar = self.n_bar
-        noise_ret = self.compute_noise(noise, n_bar)
+        n_bar = self.n_bar[date]
+        noise_ret = self.compute_noise(date, noise)
         ret_long = self.compute_ret_and_padding(data, period) + noise_ret
 
         signal = pd.Series([0] * n_bar)
@@ -225,10 +225,13 @@ class PnlCalculator(object):
         position_pos[(signal == 1) & (data["next.ask"] > 0) & (data["next.bid"] > 0)] = 1
         position_pos[(ret_long < -threshold) & (data["next.bid"] > 0)] = 0
         position_pos.ffill(inplace=True)
+
         pre_pos = position_pos.shift(1)
+
         position_pos[(position_pos == 1) & (pre_pos == 1)] = np.nan  ## holding positio rather than trade, change to nan
         position_pos[(position_pos == 1)] = 1 / data["next.ask"][(position_pos == 1)]  ## use 1/price as trading volume
         position_pos.ffill(inplace=True)
+
         position_neg = pd.Series([np.nan] * n_bar)
         position_neg[0] = 0
         position_neg[(signal == -1) & (data["next.ask"] > 0) & (data["next.bid"] > 0)] = -1
