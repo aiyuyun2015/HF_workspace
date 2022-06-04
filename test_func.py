@@ -24,7 +24,7 @@ CORE_NUM = int(os.environ['NUMBER_OF_PROCESSORS'])
 
 
 def compute_pnl_with_dask(all_dates, pnl_calculator, threshold,
-                  product="ru", period=4096,
+                  product="rb", period=4096,
                   tranct_ratio=True, tranct=1.1e-4,
                   noise=0, show=True):
     with dask.config.set(scheduler='processes', num_workers=CORE_NUM):
@@ -33,8 +33,9 @@ def compute_pnl_with_dask(all_dates, pnl_calculator, threshold,
                                   noise=noise)
         result = compute([delayed(f_par)(date) for date in all_dates])[0]
     result = pd.concat(result)
-    df1 = get_performance(result, 1, show)
-    return df1
+    df = get_performance(result, 1, show)
+    print(df)
+    return df
 
 
 def test_wprret_computation(data, wpr_ret, col, verbose=False):
@@ -92,7 +93,7 @@ def test_diff_in_shift_data(data, col):
 def test_data(date):
     # open file
     #date = '20190611'
-    input_file = dire + "/" + date + ".pkl"
+    input_file = dire + "/" + date
     with gzip.open(input_file, 'rb', compresslevel=1) as file_object:
         raw_data = file_object.read()
     print(f"Load {input_file}")
@@ -131,6 +132,22 @@ def test_fast_pnl_one_file(date):
                              tranct_ratio=True, threshold=0.001,
                              tranct=1.1e-4)
 
-    output_file = DATA_PATH + "fast_data.csv"
+    output_file = DATA_PATH + "rb_fast_data_" + date.split('.')[0]+".csv"
+    print(f"Open unit test input:{output_file}")
     assert df0.equals(pd.read_csv(output_file))
     print(df0)
+
+
+def test_fixed_size_pnl_one_file(date):
+    # test-0
+    df0 = get_daily_pnl(date, product="rb", period=4096,
+                             tranct_ratio=True, threshold=0.001,
+                             tranct=1.1e-4)
+
+    output_file = DATA_PATH + "rb_fixed_size_pnl_data_" + date.split('.')[0]+".csv"
+    expected_df = pd.read_csv(output_file)
+    print(f"Open unit test input:{output_file}")
+    if not df0.equals(expected_df):
+        print("Expected:\n", expected_df)
+        print("Calculated:\n", df0)
+    assert df0.equals(expected_df)
