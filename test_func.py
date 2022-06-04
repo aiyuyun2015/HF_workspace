@@ -92,6 +92,8 @@ def test_diff_in_shift_data(data, col):
 
 
 def test_data(date):
+    # 2022-06-04 --> two trading days, 2021-06-03 21:00 - 2022-06-05 15:00
+    # col = good, --> 2022-06-4 [9:00 - 23:00]
     # open file
     #date = '20190611'
     input_file = dire + "/" + date
