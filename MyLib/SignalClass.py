@@ -3,10 +3,9 @@ import inspect
 import pathlib
 import numpy as np
 from collections import OrderedDict
-from MyLib.helper import (zero_divide, vanish_thre, ewma,)
-from common import load, save
+from common import (load, save, zero_divide, vanish_thre, ewma,)
 
-VERBOSE=False
+VERBOSE = False
 
 
 class FactorTemplate(object):

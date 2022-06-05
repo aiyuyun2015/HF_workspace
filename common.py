@@ -8,6 +8,7 @@ from dask import compute, delayed
 import _pickle as cPickle
 import gzip
 import statsmodels.tsa.stattools as ts
+import warnings
 from collections import OrderedDict
 
 #DATA_PATH = 'C:\\Users\\Administrator\\OneDrive\\Vincent\\enerygy pkl tick 20220303\\'
@@ -20,7 +21,37 @@ product = product_list[0]
 dire = os.path.join(DATA_PATH, product)
 EPSILON = 1e-5
 
-import itertools
+
+def ewma(x, halflife, init=0, adjust=False):
+    init_s = pd.Series(data=init)
+    s = init_s.append(x)
+    if adjust:
+        xx = range(len(x))
+        lamb = 1 - 0.5**(1 / halflife)
+        aa = 1-np.power(1-lamb, xx)*(1-lamb)
+        bb = s.ewm(halflife=halflife, adjust=False).mean().iloc[1:]
+        return bb/aa
+    else:
+        return s.ewm(halflife=halflife, adjust=False).mean().iloc[1:]
+
+
+def vanish_thre(x, thre):
+    x[np.abs(x) > thre] = 0
+    return x
+
+
+def zero_divide(x, y):
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        res = np.divide(x, y)
+    if hasattr(y, "__len__"):
+        res[y == 0] = 0
+    elif y == 0:
+        if hasattr(x, "__len__"):
+            res = np.zeros(len(x))
+        else:
+            res = 0
+    return res
 
 
 def get_leaves(parent, files, dirs=None, force=True):

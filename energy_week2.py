@@ -1,17 +1,5 @@
 import os
-# from MyLib.helper import *
-# from MyLib.stats import *
-# from MyLib.product_info import *
-# from imp import reload
-# import MyLib.helper
-# import MyLib.stats
-# #import product_info
-# reload(MyLib.helper)
-# reload(MyLib.stats)
-# #reload(product_info)
-from collections import OrderedDict
-import numpy as np
-from common import (parLapply, DATA_PATH, SAVE_PATH, create_signal_path, get_leaves)
+from common import (parLapply, DATA_PATH, SAVE_PATH, get_leaves)
 from MyLib.SignalClass import (FactorTotalTradeImbPeriod, FactorTradeImbPeriod,
                                FactorAtrPeriod, build_single_signal)
 
