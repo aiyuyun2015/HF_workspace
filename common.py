@@ -10,13 +10,83 @@ import gzip
 import statsmodels.tsa.stattools as ts
 from collections import OrderedDict
 
-DATA_PATH = 'C:\\Users\\Administrator\\OneDrive\\Vincent\\enerygy pkl tick 20220303\\'
+#DATA_PATH = 'C:\\Users\\Administrator\\OneDrive\\Vincent\\enerygy pkl tick 20220303\\'
 #DATA_PATH = 'F:\\BaiduNetdiskDownload\\babyquant'
-DATA_PATH = 'C:\\Users\\Administrator\\Documents\\486_disk\\'
+#DATA_PATH = 'C:\\Users\\Administrator\\Documents\\486_disk\\'
+DATA_PATH = 'F:\\data_input\\'
+SAVE_PATH = 'F:\\data_head\\'
 product_list = ["bu", "ru", "v", "pp", "l", "jd"]
 product = product_list[0]
 dire = os.path.join(DATA_PATH, product)
 EPSILON = 1e-5
+
+import itertools
+
+
+def get_leaves(parent, files, dirs=None, force=True):
+    '''
+    O(n) version
+    Extract all the leaves(files) given a path with recurtion
+    :param parent: should be the path, note, use the deepest
+    :param files: empty []
+    :param dirs: empty []
+    :param force: when hit a soft link or sth not file, skip it or stop.
+    :return: files
+    '''
+    basename = os.listdir(parent)
+    for i in basename:
+        candidate = os.path.join(parent, i)
+        if os.path.isfile(candidate):
+            files.append(candidate)
+        elif os.path.isdir(candidate):
+            dirs.append(candidate)
+            get_leaves(candidate, files, dirs)
+        else:
+            if force:
+                print(f"Warning: {candidate} not file or path, skip..")
+            else:
+                raise ValueError(f"{candidate} not file. Stop.")
+    return files
+
+
+def create_signal_path(signal_list, product, HEAD_PATH):
+    '''
+    Given a path and signal list, create folder has the below tree shape
+    HEADP_PATH:
+        -temp_pkl
+            - product1, e.g., bu
+            - jd
+            - l
+            - pp
+            - ru
+            - v
+                - signal1, e.g., trade.imb.4096
+                - signal2
+                ...
+            ...
+
+    :param signal_list:
+    :param product:
+    :param HEAD_PATH:
+    :return:
+    '''
+
+    signal_name = signal_list.factor_name
+    periods = signal_list.params
+    for key, vals in periods.items():
+        for val in vals:
+            dirname = HEAD_PATH + "/tmp_pkl/" + product + "/"
+            signal_name_specification = signal_name.replace(key, str(val))
+            signal_dir = dirname + signal_name_specification
+            os.makedirs(signal_dir, exist_ok=True)
+
+
+def plot_data(data, show=False):
+    import matplotlib.pyplot as plt
+    plt.figure(1, figsize=(16, 10))
+    plt.plot(data.reset_index()["wpr"])
+    plt.plot(data.reset_index()[data.reset_index()["good"]]["wpr"])
+    if show: plt.show()
 
 
 def add_bandwidth_2mask(mask, size=5):
@@ -100,6 +170,12 @@ def load(path):
     with gzip.open(path, 'rb', compresslevel=1) as file_object:
         raw_data = file_object.read()
     return cPickle.loads(raw_data)
+
+
+def save(data, path):
+    serialized = cPickle.dumps(data)
+    with gzip.open(path, 'wb', compresslevel=1) as file_object:
+        file_object.write(serialized)
 
 
 def get_sample_ret(date, period):

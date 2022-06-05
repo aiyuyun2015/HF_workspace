@@ -17,10 +17,23 @@ from common import (load, get_sample_ret, parLapply,
                     compute, dire, compute_wpr,
                     adf_kpss, sample_for_stationarity,
                     get_performance, float_ndarray_equal,
-                    EPSILON, add_bandwidth_2mask, PnlCalculator)
+                    EPSILON, add_bandwidth_2mask, PnlCalculator,
+                    plot_data)
 
 CORE_NUM = int(os.environ['NUMBER_OF_PROCESSORS'])
 
+
+def test_week2_data(all_dates):
+    n_days = len(all_dates)
+    assert all_dates[0:6] == ['20171009.pkl', '20171010.pkl', '20171011.pkl',
+                              '20171012.pkl', '20171013.pkl', '20171016.pkl']
+    assert n_days == 1066
+    data = load(DATA_PATH+product_list[0]+"/"+"20190828.pkl")
+    plot_data(data)
+    data = load(DATA_PATH+product_list[0]+"/"+all_dates[0])
+    plot_data(data)
+    assert sum(data["good"]) == 37305
+    assert len(data) == 93753
 
 def compute_pnl_with_dask(all_dates, pnl_calculator, threshold,
                   product="rb", period=4096,
