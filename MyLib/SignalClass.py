@@ -9,7 +9,7 @@ from common import load, save
 VERBOSE=False
 
 
-class factor_template(object):
+class FactorTemplate(object):
     factor_name = ""
 
     params = OrderedDict([
@@ -42,7 +42,7 @@ class factor_template(object):
         return self.info()
 
 
-class foctor_total_trade_imb_periodv2(factor_template):
+class FactorTotalTradeImbPeriod(FactorTemplate):
     factor_name = "total.trade.imb.period"
     params = {"period": np.power(2, range(12, 13))}
 
@@ -58,7 +58,9 @@ class foctor_total_trade_imb_periodv2(factor_template):
         # overall, if we look at some data, I can see, kind of this is true.. Let's carry on and assume the data is
         # correct.
         try:
-            assert (data['buy.trade'] + data['buy2.trade'] + data['sell.trade'] + data['sell2.trade'] == data['qty']).all()
+            mask = (data['buy.trade'] + data['buy2.trade'] + data['sell.trade']
+                    + data['sell2.trade'] == data['qty'])
+            assert mask.all()
         except Exception as e:
             if VERBOSE:
                 print("Warning: volume computation not that correct..")
@@ -73,6 +75,25 @@ class foctor_total_trade_imb_periodv2(factor_template):
                              )
 
         return vanish_thre(signal, 1).values
+
+
+class FactorTradeImbPeriod(FactorTemplate):
+    factor_name = "trade.imb.period"
+    params = {"period": np.power(2, range(12, 13))}
+
+    def formula(self, data, period):
+        signal = zero_divide(data["buy.trade"] - data["sell.trade"],
+                             data["buy.trade"] + data["sell.trade"])
+        return ewma(signal, period, adjust=True).values
+
+
+class FactorAtrPeriod(FactorTemplate):
+    factor_name = "atr.period"
+    params = {"period": np.power(2, range(12, 13))}
+
+    def formula(self, data, period):
+        signal = (data["max."+str(period)]-data["min."+str(period)])/data["wpr"]
+        return signal
 
 
 def build_single_signal(file_name, signal_list, product, HEAD_PATH, skip=True):

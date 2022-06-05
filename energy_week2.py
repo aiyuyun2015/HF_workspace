@@ -12,29 +12,37 @@ import os
 from collections import OrderedDict
 import numpy as np
 from common import (parLapply, DATA_PATH, SAVE_PATH, create_signal_path, get_leaves)
-from MyLib.SignalClass import (foctor_total_trade_imb_periodv2, build_single_signal)
+from MyLib.SignalClass import (FactorTotalTradeImbPeriod, FactorTradeImbPeriod,
+                               FactorAtrPeriod, build_single_signal)
 
 
 def main():
-
-    # Create signal path
-    x1 = foctor_total_trade_imb_periodv2()
-    # for product in product_list:
-    #     create_signal_path(x1, product, SAVE_PATH)
 
     # Generate signal data
     for product in product_list:
         file_list = []
         file_list = get_leaves(DATA_PATH + product, file_list)
+        if DEBUG:
+            file_list = file_list[0:10]
         parLapply(CORE_NUM, file_list, build_single_signal,
-                  signal_list=x1, product=product, HEAD_PATH=SAVE_PATH)
+                  signal_list=FactorTotalTradeImbPeriod(),
+                  product=product, HEAD_PATH=SAVE_PATH)
 
+        parLapply(CORE_NUM, file_list, build_single_signal,
+                  signal_list=FactorTradeImbPeriod(),
+                  product=product, HEAD_PATH=SAVE_PATH)
+
+        parLapply(CORE_NUM, file_list, build_single_signal,
+                  signal_list=FactorAtrPeriod(),
+                  product=product, HEAD_PATH=SAVE_PATH)
 
 if __name__=='__main__':
-
+    DEBUG=True
     CORE_NUM = int(os.environ['NUMBER_OF_PROCESSORS'])
     product_list = ["bu", "ru", "v", "pp", "l", "jd"]
     all_dates = sorted(os.listdir(DATA_PATH + product_list[0]))
+    if DEBUG:
+        product_list = product_list[0:1]
     # Look-back period
     period = 4096
 
