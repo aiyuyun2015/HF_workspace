@@ -1,4 +1,4 @@
-import os.path
+import os
 import inspect
 import pathlib
 import numpy as np
@@ -109,8 +109,9 @@ def build_single_signal(file_name, signal_list, product, HEAD_PATH, skip=True):
                 pathlib.Path(output_dir).mkdir(parents=True, exist_ok=True)
             output_file = os.path.join(output_dir, basename)
             if os.path.exists(output_file) and skip:
-                print(f"Skip file {output_file}")
+                #print(f"Skip file {output_file}")
                 continue
+            # Key line, generate the signal and save output
             signal_series = signal_list.formula(raw_data, val)
             print(f"Create file {output_file}")
             save(signal_series, output_file)

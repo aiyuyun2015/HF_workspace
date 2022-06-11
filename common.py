@@ -2,6 +2,7 @@ import math, os
 import numpy as np
 import pandas as pd
 import dask
+import itertools
 import matplotlib.pyplot as plt
 import functools
 from dask import compute, delayed
@@ -9,6 +10,7 @@ import _pickle as cPickle
 import gzip
 import statsmodels.tsa.stattools as ts
 import warnings
+from MetaData.product_info import *
 from collections import OrderedDict
 
 #DATA_PATH = 'C:\\Users\\Administrator\\OneDrive\\Vincent\\enerygy pkl tick 20220303\\'
@@ -20,6 +22,166 @@ product_list = ["bu", "ru", "v", "pp", "l", "jd"]
 product = product_list[0]
 dire = os.path.join(DATA_PATH, product)
 EPSILON = 1e-5
+CORE_NUM = int(os.environ['NUMBER_OF_PROCESSORS'])
+
+
+def cum(x, n):
+    sum_x = x.cumsum()
+    sum_x_shift = sum_x.shift(n)
+    sum_x_shift[:n]= 0
+    return sum_x - sum_x_shift
+
+
+def drawdown(x):
+    y = np.cumsum(x)
+    return np.max(y)-np.max(y[-1:])
+
+
+def max_drawdown(x):
+    y = np.cumsum(x)
+    return np.max(np.maximum.accumulate(y)-y)
+
+
+def sharpe(x):
+    return zero_divide(np.mean(x)* np.sqrt(250), np.std(x, ddof=1))
+
+
+def get_hft_summary(result, thre_mat, n):
+    all_result = pd.DataFrame(data={"daily.result": result})
+    daily_num = all_result['daily.result'].apply(lambda x: x["num"])
+    daily_pnl = all_result['daily.result'].apply(lambda x: x["pnl"])
+    daily_ret = all_result['daily.result'].apply(lambda x: x["ret"])
+    total_num = daily_num.sum()
+    if len(total_num) != len(thre_mat):
+        raise ValueError("Mismatch!")
+    total_pnl = daily_pnl.sum()
+    total_ret = daily_ret.sum()
+    avg_pnl = zero_divide(total_pnl, total_num)
+    avg_ret = zero_divide(total_ret, total_num)
+    total_sharp = sharpe(daily_pnl)
+    total_drawdown = drawdown(daily_pnl)
+    total_max_drawdown = max_drawdown(daily_pnl)
+    sharpe_ret = sharpe(daily_ret)
+    drawdown_ret = drawdown(daily_ret)
+    max_drawdown_ret = max_drawdown(daily_ret)
+    final_result = pd.DataFrame(data=OrderedDict([("open", thre_mat["open"]), ("close", thre_mat["close"]), ("num", total_num),
+                                                 ("avg.pnl", avg_pnl), ("total.pnl", total_pnl), ("sharpe", total_sharp),
+                                                 ("drawdown", total_drawdown), ("max.drawdown", total_max_drawdown),
+                                                  ("avg.ret", avg_ret), ("total.ret",total_ret), ("sharpe.ret", sharpe_ret),
+                                                  ("drawdown.ret", drawdown_ret), ("max.drawdown.ret", max_drawdown_ret),
+                                                 ("mar", total_pnl/total_max_drawdown), ("mar.ret", total_ret/max_drawdown_ret)]),
+                                index=thre_mat.index)
+    return OrderedDict([("final.result", final_result), ("daily.num", daily_num), ("daily.pnl", daily_pnl), ("daily.ret", daily_ret)])
+
+
+def get_signal_pnl(file, product, signal_name, thre_mat, reverse=None, tranct=None, max_spread=None, tranct_ratio=None,
+                   DATA_PATH=None, SIGNAL_PATH=None, atr_filter=None):
+    ## load data
+    raw_path = os.path.join(DATA_PATH, product, file)
+    data = load(raw_path)
+    signal_path = os.path.join(SIGNAL_PATH, 'tmp_pkl', product, signal_name, file)
+    S = load(signal_path)
+    pred = S * reverse
+    pred = pred[data["good"]]
+    atr_signal_path = os.path.join(SIGNAL_PATH, 'tmp_pkl', 'atr.4096', signal_name, file)
+    atr = load(atr_signal_path)
+    atr = atr[data["good"]].reset_index(drop=True)
+    data = data[data["good"]].reset_index(drop=True)
+    # n_bar = len(data)
+
+    ## load signal
+
+    ## we don't know the signal is positive correlated or negative correlated
+    # n_thre = len(thre_mat)
+    result = pd.DataFrame(data=OrderedDict([("open", thre_mat["open"].values), ("close", thre_mat["close"].values),
+                                            ("num", 0), ("avg.pnl", 0), ("pnl", 0), ("avg.ret", 0), ("ret", 0)]),
+                          index=thre_mat.index)
+    count = 0
+    cur_spread = data["ask"] - data["bid"]
+    for thre in thre_mat.iterrows():
+        count = count + 1
+        buy = pred > thre[1]["open"]
+        sell = pred < -thre[1]["open"]
+        signal = pd.Series(data=0, index=data.index)
+        position = signal.copy()
+        signal[buy] = 1
+        signal[sell] = -1
+        signal[atr < atr_filter] = 0
+        scratch = -thre[1]["close"]
+        position_pos = pd.Series(data=np.nan, index=data.index)
+        position_pos.iloc[0] = 0
+        position_pos[(signal == 1) & (data["next.ask"] > 0) & (data["next.bid"] > 0) & (cur_spread < max_spread)] = 1
+        position_pos[(pred < -scratch) & (data["next.bid"] > 0) & (cur_spread < max_spread)] = 0
+        position_pos.ffill(inplace=True)
+        pre_pos = position_pos.shift(1)
+        notional_position_pos = pd.Series(data=0, index=data.index)
+        notional_position_pos[position_pos == 1] = 1
+        notional_position_pos[(position_pos == 1) & (pre_pos == 1)] = np.nan
+        notional_position_pos[(notional_position_pos == 1)] = 1 / data["next.ask"][(notional_position_pos == 1)]
+        notional_position_pos.ffill(inplace=True)
+        position_neg = pd.Series(data=np.nan, index=data.index)
+        position_neg.iloc[0] = 0
+        position_neg[(signal == -1) & (data["next.ask"] > 0) & (data["next.bid"] > 0) & (cur_spread < max_spread)] = -1
+        position_neg[(pred > scratch) & (data["next.ask"] > 0) & (cur_spread < max_spread)] = 0
+        position_neg.ffill(inplace=True)
+        pre_neg = position_neg.shift(1)
+        notional_position_neg = pd.Series(data=0, index=data.index)
+        notional_position_neg[position_neg == -1] = -1
+        notional_position_neg[(position_neg == -1) & (pre_neg == -1)] = np.nan
+        notional_position_neg[(notional_position_neg == -1)] = -1 / data["next.bid"][(notional_position_neg == -1)]
+        notional_position_neg.ffill(inplace=True)
+        position = position_pos + position_neg
+        notional_position = notional_position_pos + notional_position_neg
+        # position[n_bar-1] = 0
+        position.iloc[0] = 0
+        position.iloc[-2:] = 0
+        notional_position.iloc[0] = 0
+        notional_position.iloc[-2:] = 0
+        change_pos = position - position.shift(1)
+        notional_change_pos = notional_position - notional_position.shift(1)
+        change_pos.iloc[0] = 0
+        notional_change_pos.iloc[0] = 0
+        change_base = pd.Series(data=0, index=data.index)
+        change_buy = change_pos > 0
+        change_sell = change_pos < 0
+        if (tranct_ratio):
+            change_base[change_buy] = data["next.ask"][change_buy] * (1 + tranct)
+            change_base[change_sell] = data["next.bid"][change_sell] * (1 - tranct)
+        else:
+            change_base[change_buy] = data["next.ask"][change_buy] + tranct
+            change_base[change_sell] = data["next.bid"][change_sell] - tranct
+        final_pnl = -sum(change_base * change_pos)
+        ret = -sum(change_base * notional_change_pos)
+        num = sum((position != 0) & (change_pos != 0))
+        if num == 0:
+            result.loc[thre[0], ("num", "avg.pnl", "pnl", "avg.ret", "ret")] = (0, 0, 0, 0, 0)
+            return result
+        else:
+            avg_pnl = np.divide(final_pnl, num)
+            avg_ret = np.divide(ret, num)
+            result.loc[thre[0], ("num", "avg.pnl", "pnl", "avg.ret", "ret")] = (num, avg_pnl, final_pnl, avg_ret, ret)
+    return result
+
+
+def compute_signal_pnl(product, thre_mat, n_days, all_trade_stat, signal_name, all_dates):
+    spread = product_info[product]["spread"]
+    tranct = product_info[product]["tranct"]
+    tranct_ratio = product_info[product]["tranct.ratio"]
+    with dask.config.set(scheduler='processes', num_workers=CORE_NUM):
+        f_par = functools.partial(get_signal_pnl, product=product, signal_name=signal_name, thre_mat=thre_mat,
+                                  reverse=1, tranct=tranct, max_spread=spread * 1.1, tranct_ratio=tranct_ratio,
+                                  atr_filter=0.01, DATA_PATH=DATA_PATH, SIGNAL_PATH=SAVE_PATH)
+        result = compute([delayed(f_par)(file) for file in all_dates])[0]
+    trade_stat = get_hft_summary(result, thre_mat, n_days)
+    all_trade_stat[product] = trade_stat
+
+
+def make_grid(open_list, close_list):
+    product_tuple = list(itertools.product(open_list, close_list))  # make list to use the generator twice
+    open_price = list(map(lambda x: x[0], product_tuple))
+    close_price = list(map(lambda x: x[0] * x[-1] * (-1), product_tuple))
+    thre_mat = pd.DataFrame({'open': open_price, 'close': close_price})
+    return thre_mat
 
 
 def ewma(x, halflife, init=0, adjust=False):
@@ -414,3 +576,8 @@ def get_pnl_from_data_positions(data, position, tranct_ratio, tranct, date):
     result = pd.DataFrame({"date": date, "final.pnl": final_pnl, "turnover": turnover, "num": num,
                            "hld.period": hld_period}, index=[0])
     return result
+
+
+from collections import OrderedDict
+
+
